@@ -1,0 +1,33 @@
+module.exports = {
+  apps: [
+    {
+      name: 'scan-qrcode-frontend',
+      script: 'serve',
+      cwd: './Final-Scan-QRCode-Frontend',
+      env: {
+        PM2_SERVE_PATH: './dist',
+        PM2_SERVE_PORT: 5173,
+        PM2_SERVE_SPA: 'true',
+        NODE_ENV: 'production',
+      },
+    },
+    {
+      name: 'scan-qrcode-backend',
+      script: 'build/bin/server.js',
+      cwd: './Final-Scan-QRCode-Backend',
+      env: {
+        TZ: 'UTC',
+        PORT: 3333,
+        HOST: '0.0.0.0',
+        LOG_LEVEL: 'info',
+        APP_KEY: '',
+        NODE_ENV: 'production',
+        DB_HOST: '127.0.0.1',
+        DB_PORT: 3306,
+        DB_USER: 'root',
+        DB_PASSWORD: 'root',
+        DB_DATABASE: '',
+      },
+    },
+  ],
+}
