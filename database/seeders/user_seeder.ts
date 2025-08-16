@@ -22,5 +22,13 @@ export default class UserSeeder extends BaseSeeder {
       password: 'user123',
       role: 'user',
     })
+
+    // Inspector account
+    await User.create({
+      username: 'inspector',
+      email: 'inspector@gmail.com',
+      password: 'inspector123',
+      role: 'inspector',
+    })
   }
 }

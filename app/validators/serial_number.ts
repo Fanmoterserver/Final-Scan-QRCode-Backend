@@ -13,6 +13,6 @@ export const serialNumberValidator = vine.compile(
 
     lotNo: vine.string().maxLength(10).trim().minLength(1),
 
-    serialNumber: vine.string().maxLength(30).trim().minLength(1),
+    serialNumber: vine.string().maxLength(40).trim().minLength(1),
   })
 )

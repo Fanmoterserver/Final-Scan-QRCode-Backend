@@ -9,52 +9,55 @@ export default class SummaryController {
 
     const modelName = request.input('modelName')
     const lotNo = request.input('lotNo')
-    const hasFilter = !!modelName || !!lotNo
+    // const hasFilter = !!modelName || !!lotNo
 
-    // Reusable filter function
-    const applyFilters = (query: any, modelName?: string, lotNo?: string) => {
-      if (modelName) {
-        query.whereILike('models.model_name', `${modelName}%`)
-      }
-      if (lotNo) {
-        query.whereILike('serial_numbers.lot_no', `${lotNo}%`)
-      }
+    const applyFilters = (query: any) => {
+      if (modelName) query.whereILike('models.model_name', `${modelName}%`)
+      if (lotNo) query.whereILike('serial_numbers.lot_no', `${lotNo}%`)
     }
 
-    // Get all matching group keys
-    const groupKeyQuery = db
+    // STEP 1: Get latest 100 unique group keys
+    const baseGroupQuery = db
       .from('serial_numbers')
       .join('models', 'serial_numbers.model_id', '=', 'models.id')
       .select(
-        'serial_numbers.lot_no',
         'models.id as model_id',
+        'serial_numbers.lot_no',
         'serial_numbers.shift',
         'serial_numbers.line_no',
         db.raw('MIN(serial_numbers.created_at) as firstCreatedAt')
       )
       .groupBy(
-        'serial_numbers.lot_no',
         'models.id',
+        'serial_numbers.lot_no',
         'serial_numbers.shift',
         'serial_numbers.line_no'
       )
       .orderBy('firstCreatedAt', 'desc')
+      .limit(100) // Always limit to 100 groups
 
-    applyFilters(groupKeyQuery, modelName, lotNo)
+    applyFilters(baseGroupQuery)
 
-    if (!hasFilter) {
-      groupKeyQuery.limit(100) // Only latest 100 groups when no filter
+    const allGroups = await baseGroupQuery
+    const total = allGroups.length
+    const lastPage = Math.max(1, Math.ceil(total / perPage))
+
+    // Get only groups for the current page
+    const paginatedGroups = allGroups.slice(offset, offset + perPage)
+
+    if (paginatedGroups.length === 0) {
+      return response.ok({
+        data: [],
+        pagination: {
+          total,
+          perPage,
+          currentPage: page,
+          lastPage,
+        },
+      })
     }
 
-    const groupKeys = await groupKeyQuery
-
-    const total = groupKeys.length
-    const lastPage = Math.max(1, Math.ceil(total / perPage))
-    const paginatedGroups = groupKeys.slice(offset, offset + perPage)
-
-    // This will be sent to frontend
-
-    // Now fetch actual data using these paginated group keys
+    // STEP 2: Fetch full data for paginated group keys
     const dataQuery = db
       .from('serial_numbers')
       .join('models', 'serial_numbers.model_id', '=', 'models.id')
@@ -92,20 +95,18 @@ export default class SummaryController {
       )
       .orderBy('firstCreatedAt', 'desc')
 
-    // Narrow to just the paginated groups
-    if (paginatedGroups.length) {
-      dataQuery.where((query) => {
-        for (const group of paginatedGroups) {
-          query.orWhere((subQuery) => {
-            subQuery
-              .where('serial_numbers.lot_no', group.lot_no)
-              .where('models.id', group.model_id)
-              .where('serial_numbers.shift', group.shift)
-              .where('serial_numbers.line_no', group.line_no)
-          })
-        }
-      })
-    }
+    // Filter only by paginated groups
+    dataQuery.where((query) => {
+      for (const group of paginatedGroups) {
+        query.orWhere((sub) => {
+          sub
+            .where('models.id', group.model_id)
+            .where('serial_numbers.lot_no', group.lot_no)
+            .where('serial_numbers.shift', group.shift)
+            .where('serial_numbers.line_no', group.line_no)
+        })
+      }
+    })
 
     const data = await dataQuery
 

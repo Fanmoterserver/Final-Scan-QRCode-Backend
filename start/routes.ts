@@ -31,9 +31,12 @@ router.post('upload_serials', [SerialNumbersController, 'uploadExcel'])
 router
   .get('summary', [SummaryController, 'dataSummary'])
   .use(middleware.auth())
-  .use(middleware.role(['admin']))
+  .use(middleware.role(['admin', 'inspector']))
 
 // Define a resourceful route for the ModelsController
 router.resource('models', ModelsController).use('*', middleware.auth())
 router.resource('serial_numbers', SerialNumbersController).use('*', middleware.auth())
-router.resource('actual_records', ActualRecordsController).use('*', middleware.auth())
+router
+  .resource('actual_records', ActualRecordsController)
+  .use('*', middleware.auth())
+  .use('*', middleware.role(['admin', 'user']))

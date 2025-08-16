@@ -17,7 +17,7 @@ export default class User extends compose(BaseModel, AuthFinder) {
   declare username: string // used for login
 
   @column()
-  declare role: 'admin' | 'user' // used for access restriction
+  declare role: 'admin' | 'user' | 'inspector' // used for access restriction
 
   @column()
   declare email: string // optional, not used for login now
