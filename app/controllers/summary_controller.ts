@@ -9,17 +9,29 @@ export default class SummaryController {
 
     const modelName = request.input('modelName')
     const lotNo = request.input('lotNo')
-    // const hasFilter = !!modelName || !!lotNo
+    const hasFilter = !!modelName || !!lotNo
 
     const applyFilters = (query: any) => {
       if (modelName) query.whereILike('models.model_name', `${modelName}%`)
       if (lotNo) query.whereILike('serial_numbers.lot_no', `${lotNo}%`)
     }
 
-    // STEP 1: Get latest 100 unique group keys
-    const baseGroupQuery = db
+    // STEP 1: Get unique group keys (limit dataset if no filters)
+
+    let baseGroupQuery = db
       .from('serial_numbers')
       .join('models', 'serial_numbers.model_id', '=', 'models.id')
+
+    // If no filter → restrict to last 500k rows
+    if (!hasFilter) {
+      baseGroupQuery = baseGroupQuery.where(
+        'serial_numbers.id',
+        '>',
+        db.raw('(SELECT COALESCE(MAX(id) - 500000, 0) FROM serial_numbers)')
+      )
+    }
+
+    baseGroupQuery
       .select(
         'models.id as model_id',
         'serial_numbers.lot_no',
@@ -34,11 +46,12 @@ export default class SummaryController {
         'serial_numbers.line_no'
       )
       .orderBy('firstCreatedAt', 'desc')
-      .limit(100) // Always limit to 100 groups
+      .limit(100)
 
     applyFilters(baseGroupQuery)
 
     const allGroups = await baseGroupQuery
+
     const total = allGroups.length
     const lastPage = Math.max(1, Math.ceil(total / perPage))
 
@@ -58,7 +71,8 @@ export default class SummaryController {
     }
 
     // STEP 2: Fetch full data for paginated group keys
-    const dataQuery = db
+
+    let dataQuery = db
       .from('serial_numbers')
       .join('models', 'serial_numbers.model_id', '=', 'models.id')
       .leftJoin('actual_records', function () {
@@ -95,7 +109,17 @@ export default class SummaryController {
       )
       .orderBy('firstCreatedAt', 'desc')
 
-    // Filter only by paginated groups
+    // Restrict to 500k rows also in data query (if no filter)
+    if (!hasFilter) {
+      // it calculate by take the latest id 500k rows
+      dataQuery = dataQuery.where(
+        'serial_numbers.id',
+        '>',
+        db.raw('(SELECT COALESCE(MAX(id) - 500000, 0) FROM serial_numbers)')
+      )
+    }
+
+    // Only fetch paginated groups
     dataQuery.where((query) => {
       for (const group of paginatedGroups) {
         query.orWhere((sub) => {
