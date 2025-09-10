@@ -87,6 +87,7 @@ export default class SummaryController {
         'serial_numbers.lot_no as lotNo',
         'models.model_name as modelName',
         'models.customer_pn as customerPn',
+        'models.pn',
         'models.digit',
         'serial_numbers.shift',
         'serial_numbers.line_no as lineNo',
