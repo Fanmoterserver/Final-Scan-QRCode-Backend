@@ -33,6 +33,12 @@ router
   .use(middleware.auth())
   .use(middleware.role(['admin', 'inspector']))
 
+// DELETE summary by modelName and lotNo
+router
+  .delete('summary', [SummaryController, 'deleteByModelNameAndLot'])
+  .use(middleware.auth())
+  .use(middleware.role(['admin']))
+
 // Define a resourceful route for the ModelsController
 router.resource('models', ModelsController).use('*', middleware.auth())
 router.resource('serial_numbers', SerialNumbersController).use('*', middleware.auth())
