@@ -16,6 +16,9 @@ export default class Model extends BaseModel {
   @column()
   declare digit: number
 
+  @column()
+  declare pn: string | null
+
   @column.dateTime({ autoCreate: true })
   declare createdAt: DateTime
 

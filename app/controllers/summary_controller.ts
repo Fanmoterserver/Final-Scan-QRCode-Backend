@@ -2,7 +2,10 @@ import type { HttpContext } from '@adonisjs/core/http'
 import db from '@adonisjs/lucid/services/db'
 
 export default class SummaryController {
+  // GET /summary/data-summary
   async dataSummary({ request, response }: HttpContext) {
+    console.time('dataSummary_total')
+
     const page = Number(request.input('page', 1)) || 1
     const perPage = 10
     const offset = (page - 1) * perPage
@@ -17,6 +20,7 @@ export default class SummaryController {
     }
 
     // STEP 1: Get unique group keys (limit dataset if no filters)
+    console.time('step1_groups')
 
     let baseGroupQuery = db
       .from('serial_numbers')
@@ -52,6 +56,8 @@ export default class SummaryController {
 
     const allGroups = await baseGroupQuery
 
+    console.timeEnd('step1_groups')
+
     const total = allGroups.length
     const lastPage = Math.max(1, Math.ceil(total / perPage))
 
@@ -71,6 +77,7 @@ export default class SummaryController {
     }
 
     // STEP 2: Fetch full data for paginated group keys
+    console.time('step2_fullData')
 
     let dataQuery = db
       .from('serial_numbers')
@@ -87,6 +94,7 @@ export default class SummaryController {
         'serial_numbers.lot_no as lotNo',
         'models.model_name as modelName',
         'models.customer_pn as customerPn',
+        'models.pn',
         'models.digit',
         'serial_numbers.shift',
         'serial_numbers.line_no as lineNo',
@@ -133,6 +141,9 @@ export default class SummaryController {
     })
 
     const data = await dataQuery
+    console.timeEnd('step2_fullData')
+
+    console.timeEnd('dataSummary_total')
 
     return response.ok({
       data,
@@ -143,5 +154,53 @@ export default class SummaryController {
         lastPage,
       },
     })
+  }
+
+  // DELETE /summary/delete-by-model-and-lot
+  async deleteByModelNameAndLot({ request, response }: HttpContext) {
+    const modelName = request.input('modelName')
+    const lotNo = request.input('lotNo')
+
+    if (!modelName || !lotNo) {
+      return response.badRequest({
+        message: 'modelName and lotNo are required',
+      })
+    }
+
+    const trx = await db.transaction()
+
+    try {
+      // 1️⃣ Find model id by name
+      const model = await trx.from('models').where('model_name', modelName).select('id').first()
+
+      if (!model) {
+        await trx.rollback()
+        return response.notFound({
+          message: 'Model not found',
+        })
+      }
+
+      // 2️⃣ Delete serial numbers
+      const deletedSerials = await trx
+        .from('serial_numbers')
+        .where('model_id', model.id)
+        .where('lot_no', lotNo)
+        .delete()
+
+      // 3️⃣ Delete actual records
+      await trx.from('actual_records').where('model_id', model.id).where('lot_no', lotNo).delete()
+
+      await trx.commit()
+
+      return response.ok({
+        message: 'Deleted successfully',
+        deletedSerials,
+      })
+    } catch (error) {
+      await trx.rollback()
+      return response.internalServerError({
+        message: 'Delete failed',
+      })
+    }
   }
 }
