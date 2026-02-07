@@ -20,14 +20,8 @@ export default class SerialNumbersController {
 
   // upload serial numbers from Excel file
   async uploadExcel({ request, response }: HttpContext) {
-    const file = request.file('file', {
-      extnames: ['xlsx', 'xls'],
-      size: '5mb',
-    })
-
-    if (!file) {
-      return response.badRequest({ message: 'No file uploaded' })
-    }
+    const file = request.file('file', { extnames: ['xlsx', 'xls'], size: '5mb' })
+    if (!file) return response.badRequest({ message: 'No file uploaded' })
 
     const filePath = Application.tmpPath(`uploads/${file.clientName}`)
     await file.move(Application.tmpPath('uploads'), { name: file.clientName })
@@ -35,51 +29,50 @@ export default class SerialNumbersController {
     try {
       const workbook = Excel.readFile(filePath)
       const sheet = workbook.Sheets[workbook.SheetNames[0]]
-      const data = Excel.utils.sheet_to_json(sheet)
 
-      if (data.length === 0) {
-        return response.badRequest({ message: 'Excel file is empty' })
+      // 1. Extract Metadata from specific cells
+      // Note: xlsx cells are 0-indexed internally, but standard access uses names
+      const modelName = sheet['D1']?.v // Cell D1
+      const lotNo = sheet['B2']?.v?.toString() // Cell B2
+      const lineNo = sheet['D2']?.v // Cell D2
+
+      if (!modelName || !lotNo || !lineNo) {
+        return response.badRequest({ message: 'Missing Model, Lot, or Line information in header' })
       }
 
-      // 🔍 Take shared values from the first row
-      const { modelName, lotNo, shift, lineNo } = data[0] as any
+      // 2. Logic for Shift (Odd = A, Even = B)
+      const lastDigit = parseInt(lotNo.slice(-1))
+      const shift = lastDigit % 2 !== 0 ? 'A' : 'B'
 
-      if (!modelName || !lotNo || !shift || !lineNo) {
-        return response.badRequest({
-          message: 'First row must include modelName, lotNo, shift, and lineNo',
-        })
-      }
-
-      // 🔄 Get model ID by name
+      // 3. Get Model ID
       const model = await Model.findBy('model_name', modelName)
-      if (!model) {
-        return response.badRequest({ message: `Model '${modelName}' not found` })
-      }
+      if (!model) return response.badRequest({ message: `Model '${modelName}' not found` })
 
-      const modelId = model.id
+      // 4. Extract Serial Numbers starting from Row 5
+      // 'range: 4' tells it to skip the first 4 rows (0, 1, 2, 3)
+      const data = Excel.utils.sheet_to_json(sheet, { range: 3 })
 
-      // 🧹 Format data: apply first-row values to all rows
       const formattedRows = data
         .map((row: any) => ({
-          model_id: modelId,
+          model_id: model.id,
           shift: shift,
           line_no: lineNo,
           lot_no: lotNo,
-          serial_number: row.serialNumber,
+          serial_number: row['Serial Number'], // Matches the green header in your image
           created_at: new Date(),
           updated_at: new Date(),
         }))
-        .filter((row) => !!row.serial_number) // skip rows with empty serials
+        .filter((row) => !!row.serial_number)
 
-      // 🔍 Fetch existing serials
+      // ... (rest of your existing duplicate checking and insert logic) ...
+
+      // Existing duplicate check logic remains the same
       const existingSerials = await SerialNumber.query()
-        .where('model_id', modelId)
+        .where('model_id', model.id)
         .where('lot_no', lotNo)
         .select('serial_number')
 
       const existingSet = new Set(existingSerials.map((s) => s.serialNumber))
-
-      // 🚫 Filter duplicates
       const duplicates: string[] = []
       const uniqueRows = formattedRows.filter((row) => {
         const isDup = existingSet.has(row.serial_number)
@@ -87,7 +80,6 @@ export default class SerialNumbersController {
         return !isDup
       })
 
-      // ✅ Insert
       if (uniqueRows.length > 0) {
         await db.table('serial_numbers').insert(uniqueRows)
       }
@@ -98,14 +90,13 @@ export default class SerialNumbersController {
         message: 'Upload completed',
         inserted: uniqueRows.length,
         skipped: duplicates.length,
-        duplicates,
+        shift_detected: shift,
       })
     } catch (error) {
       console.error(error)
       return response.internalServerError({ message: 'Failed to process file' })
     }
   }
-
   async filter({ request, response }: HttpContext) {
     const modelName = request.input('modelName')
     const lotNo = request.input('lotNo')
