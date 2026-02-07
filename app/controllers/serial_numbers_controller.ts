@@ -41,7 +41,15 @@ export default class SerialNumbersController {
       }
 
       // 2. Logic for Shift (Odd = A, Even = B)
-      const lastDigit = parseInt(lotNo.slice(-1))
+      const lastChar = lotNo.toString().slice(-1)
+      const lastDigit = parseInt(lastChar)
+
+      if (isNaN(lastDigit)) {
+        return response.badRequest({
+          message: `Lot number '${lotNo}' must end in a digit to determine the shift.`,
+        })
+      }
+
       const shift = lastDigit % 2 !== 0 ? 'A' : 'B'
 
       // 3. Get Model ID
