@@ -4,7 +4,7 @@ import db from '@adonisjs/lucid/services/db'
 export default class SummaryController {
   // GET /summary/data-summary
   async dataSummary({ request, response }: HttpContext) {
-    console.time('dataSummary_total')
+    // console.time('dataSummary_total')
 
     const page = Number(request.input('page', 1)) || 1
     const perPage = 10
@@ -20,7 +20,7 @@ export default class SummaryController {
     }
 
     // STEP 1: Get unique group keys (limit dataset if no filters)
-    console.time('step1_groups')
+    // console.time('step1_groups')
 
     let baseGroupQuery = db
       .from('serial_numbers')
@@ -56,7 +56,7 @@ export default class SummaryController {
 
     const allGroups = await baseGroupQuery
 
-    console.timeEnd('step1_groups')
+    // console.timeEnd('step1_groups')
 
     const total = allGroups.length
     const lastPage = Math.max(1, Math.ceil(total / perPage))
@@ -141,9 +141,9 @@ export default class SummaryController {
     })
 
     const data = await dataQuery
-    console.timeEnd('step2_fullData')
+    // console.timeEnd('step2_fullData')
 
-    console.timeEnd('dataSummary_total')
+    // console.timeEnd('dataSummary_total')
 
     return response.ok({
       data,
