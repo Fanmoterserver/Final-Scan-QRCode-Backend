@@ -178,18 +178,45 @@ export default class SerialNumbersController {
     // 👉 Skip duplication check if customerPn length === digit
     const isBypassDuplication = model.customerPn.length === model.digit
 
-    // 🛑 Check for duplication
     if (!isBypassDuplication) {
-      const exists = await SerialNumber.query()
-        .where('serial_number', serialNumber)
-        .where('model_id', modelId)
-        .where('lot_no', lotNo)
-        .first()
+      if (model.isEricsson) {
+        if (lotNo.length < 7 || serialNumber.length < 7) {
+          return response.status(422).send({
+            success: false,
+            message: 'Invalid lot or serial number length for Ericsson model.',
+          })
+        }
 
-      if (exists) {
-        return response
-          .status(409) // Conflict status for duplicate entries
-          .send({ success: false, message: 'Duplicate serial number not allowed.' })
+        const lotPrefix = lotNo.slice(0, 4)
+        const serialSuffix = serialNumber.slice(-7)
+        console.log('lot prefix:', lotPrefix, 'and serial suffix:', serialSuffix)
+
+        const exists = await SerialNumber.query()
+          .where('model_id', modelId)
+          .whereRaw('LEFT(lot_no, 4) = ?', [lotPrefix])
+          .whereRaw('RIGHT(serial_number, 7) = ?', [serialSuffix])
+          .first()
+
+        if (exists) {
+          return response.status(409).send({
+            success: false,
+            message: 'Duplicate serial number not allowed.',
+          })
+        }
+      } else {
+        // 🔹 normal model logic
+        const exists = await SerialNumber.query()
+          .where('serial_number', serialNumber)
+          .where('model_id', modelId)
+          .where('lot_no', lotNo)
+          .first()
+
+        if (exists) {
+          return response.status(409).send({
+            success: false,
+            message: 'Duplicate serial number not allowed.',
+          })
+        }
       }
     }
 

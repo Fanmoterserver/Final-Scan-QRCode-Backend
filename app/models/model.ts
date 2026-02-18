@@ -19,6 +19,9 @@ export default class Model extends BaseModel {
   @column()
   declare pn: string | null
 
+  @column()
+  declare isEricsson: boolean
+
   @column.dateTime({ autoCreate: true })
   declare createdAt: DateTime
 

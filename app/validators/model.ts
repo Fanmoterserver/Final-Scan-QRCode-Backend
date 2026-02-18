@@ -6,5 +6,6 @@ export const modelValidator = vine.compile(
     customerPn: vine.string().trim().minLength(1),
     digit: vine.number().positive().min(1),
     pn: vine.string().trim().optional().nullable(),
+    isEricsson: vine.boolean().optional(),
   })
 )
