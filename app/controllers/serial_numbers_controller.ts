@@ -35,22 +35,35 @@ export default class SerialNumbersController {
       const modelName = sheet['D1']?.v // Cell D1
       const lotNo = sheet['B2']?.v?.toString() // Cell B2
       const lineNo = sheet['D2']?.v // Cell D2
+      const shiftFromExcel = sheet['D3']?.v // Cell D3
 
       if (!modelName || !lotNo || !lineNo) {
         return response.badRequest({ message: 'Missing Model, Lot, or Line information in header' })
       }
 
       // 2. Logic for Shift (Odd = A, Even = B)
-      const lastChar = lotNo.toString().slice(-1)
-      const lastDigit = parseInt(lastChar)
+      // check if lotNo length is 6, then shift must be provided in D3, otherwise determine shift by last digit of lotNo
+      let shift: string
 
-      if (isNaN(lastDigit)) {
-        return response.badRequest({
-          message: `Lot number '${lotNo}' must end in a digit to determine the shift.`,
-        })
+      if (lotNo.length === 6) {
+        if (!shiftFromExcel) {
+          return response.badRequest({
+            message: 'Shift (D3) is required when Lot No length is 6',
+          })
+        }
+        shift = shiftFromExcel.toString()
+      } else {
+        const lastChar = lotNo.toString().slice(-1)
+        const lastDigit = parseInt(lastChar)
+
+        if (isNaN(lastDigit)) {
+          return response.badRequest({
+            message: `Lot number '${lotNo}' must end in a digit to determine the shift.`,
+          })
+        }
+
+        shift = lastDigit % 2 !== 0 ? 'A' : 'B'
       }
-
-      const shift = lastDigit % 2 !== 0 ? 'A' : 'B'
 
       // 3. Get Model ID
       const model = await Model.findBy('model_name', modelName)
