@@ -77,7 +77,7 @@ export default class SummaryController {
     }
 
     // STEP 2: Fetch full data for paginated group keys
-    console.time('step2_fullData')
+    // console.time('step2_fullData')
 
     let dataQuery = db
       .from('serial_numbers')
