@@ -88,18 +88,45 @@ export default class SerialNumbersController {
       // ... (rest of your existing duplicate checking and insert logic) ...
 
       // Existing duplicate check logic remains the same
-      const existingSerials = await SerialNumber.query()
-        .where('model_id', model.id)
-        .where('lot_no', lotNo)
-        .select('serial_number')
+      let duplicates: string[] = []
+      let uniqueRows: any[] = []
 
-      const existingSet = new Set(existingSerials.map((s) => s.serialNumber))
-      const duplicates: string[] = []
-      const uniqueRows = formattedRows.filter((row) => {
-        const isDup = existingSet.has(row.serial_number)
-        if (isDup) duplicates.push(row.serial_number)
-        return !isDup
-      })
+      if (model.isEricsson) {
+        // 🔥 Ericsson logic (last 7 digits only)
+
+        const existingSerials = await SerialNumber.query()
+          .where('model_id', model.id)
+          .select('serial_number')
+
+        const existingSuffixSet = new Set(existingSerials.map((s) => s.serialNumber.slice(-7)))
+
+        uniqueRows = formattedRows.filter((row) => {
+          const suffix = row.serial_number.slice(-7)
+
+          const isDup = existingSuffixSet.has(suffix)
+
+          if (isDup) duplicates.push(row.serial_number)
+
+          return !isDup
+        })
+      } else {
+        // 🔹 Normal logic
+
+        const existingSerials = await SerialNumber.query()
+          .where('model_id', model.id)
+          .where('lot_no', lotNo)
+          .select('serial_number')
+
+        const existingSet = new Set(existingSerials.map((s) => s.serialNumber))
+
+        uniqueRows = formattedRows.filter((row) => {
+          const isDup = existingSet.has(row.serial_number)
+
+          if (isDup) duplicates.push(row.serial_number)
+
+          return !isDup
+        })
+      }
 
       if (uniqueRows.length > 0) {
         await db.table('serial_numbers').insert(uniqueRows)
@@ -118,6 +145,7 @@ export default class SerialNumbersController {
       return response.internalServerError({ message: 'Failed to process file' })
     }
   }
+
   async filter({ request, response }: HttpContext) {
     const modelName = request.input('modelName')
     const lotNo = request.input('lotNo')
@@ -200,20 +228,17 @@ export default class SerialNumbersController {
           })
         }
 
-        const lotPrefix = lotNo.slice(0, 4)
         const serialSuffix = serialNumber.slice(-7)
-        console.log('lot prefix:', lotPrefix, 'and serial suffix:', serialSuffix)
 
         const exists = await SerialNumber.query()
           .where('model_id', modelId)
-          .whereRaw('LEFT(lot_no, 4) = ?', [lotPrefix])
           .whereRaw('RIGHT(serial_number, 7) = ?', [serialSuffix])
           .first()
 
         if (exists) {
           return response.status(409).send({
             success: false,
-            message: 'Duplicate serial number not allowed.',
+            message: `Model: ${model.modelName} Serial number លេខចុងក្រោយ ${serialSuffix} Scan រួចម្តងហើយសូមចាប់ motor ទុកនៅ tray។`,
           })
         }
       } else {
@@ -227,7 +252,7 @@ export default class SerialNumbersController {
         if (exists) {
           return response.status(409).send({
             success: false,
-            message: 'Duplicate serial number not allowed.',
+            message: `Serial number ${serialNumber} Scan រួចម្តងហើយសូមចាប់ motor ទុកនៅ tray។`,
           })
         }
       }
