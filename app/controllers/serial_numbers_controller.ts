@@ -80,6 +80,7 @@ export default class SerialNumbersController {
           line_no: lineNo,
           lot_no: lotNo,
           serial_number: row['Serial Number'], // Matches the green header in your image
+          serial_suffix: row['Serial Number']?.slice(-7), // Extract last 7 digits as suffix
           created_at: new Date(),
           updated_at: new Date(),
         }))
@@ -93,12 +94,13 @@ export default class SerialNumbersController {
 
       if (model.isEricsson) {
         // 🔥 Ericsson logic (last 7 digits only)
-
+        const suffixes = formattedRows.map((r) => r.serial_suffix)
         const existingSerials = await SerialNumber.query()
           .where('model_id', model.id)
-          .select('serial_number')
+          .whereIn('serial_suffix', suffixes)
+          .select('serial_suffix')
 
-        const existingSuffixSet = new Set(existingSerials.map((s) => s.serialNumber.slice(-7)))
+        const existingSuffixSet = new Set(existingSerials.map((s) => s.serialSuffix))
 
         uniqueRows = formattedRows.filter((row) => {
           const suffix = row.serial_number.slice(-7)
@@ -208,6 +210,7 @@ export default class SerialNumbersController {
 
     // 🔍 Destructure relevant fields from payload
     const { serialNumber, modelId, lotNo } = payload
+    const serialSuffix = serialNumber.slice(-7)
 
     // 🔍 Get model to check customer_pn and digit
     const model = await Model.find(modelId)
@@ -227,12 +230,9 @@ export default class SerialNumbersController {
             message: 'Invalid lot or serial number length for Ericsson model.',
           })
         }
-
-        const serialSuffix = serialNumber.slice(-7)
-
         const exists = await SerialNumber.query()
           .where('model_id', modelId)
-          .whereRaw('RIGHT(serial_number, 7) = ?', [serialSuffix])
+          .where('serial_suffix', serialSuffix)
           .first()
 
         if (exists) {
@@ -259,7 +259,10 @@ export default class SerialNumbersController {
     }
 
     // ✅ If not duplicate, proceed to create
-    const newSerialNumber = await SerialNumber.create(payload)
+    const newSerialNumber = await SerialNumber.create({
+      ...payload,
+      serialSuffix: serialSuffix,
+    })
 
     return response.status(201).send({
       success: true,
