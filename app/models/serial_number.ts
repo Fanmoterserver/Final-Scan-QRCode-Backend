@@ -22,6 +22,9 @@ export default class SerialNumber extends BaseModel {
   @column()
   declare serialNumber: string
 
+  @column()
+  declare serialSuffix: string
+
   @column.dateTime({ autoCreate: true })
   declare createdAt: DateTime
 
