@@ -40,7 +40,7 @@ export default class ActualRecordsController {
         await record.save()
       }
       return response.ok({ success: true, data: record, message: 'Actual record success' })
-    } catch (error) {
+    } catch (error: any) {
       if (error.status === 422) {
         return response.status(422).send({
           success: false,
