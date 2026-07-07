@@ -8,6 +8,11 @@ import Excel from 'xlsx'
 import Application from '@adonisjs/core/services/app'
 import fs from 'fs/promises'
 import db from '@adonisjs/lucid/services/db'
+import {
+  incrementModelSummary,
+  incrementModelSummaryBulk,
+  decrementModelSummary,
+} from '#services/model_summary_service'
 
 function findHeaderRowIndex(sheet: Excel.WorkSheet): number | null {
   const range = Excel.utils.decode_range(sheet['!ref'] ?? 'A1')
@@ -154,6 +159,9 @@ export default class SerialNumbersController {
 
       if (uniqueRows.length > 0) {
         await db.table('serial_numbers').insert(uniqueRows)
+        // ADDED: keep model_summary in sync with this batch so dataSummary()
+        // reflects it immediately without recomputing from raw rows.
+        await incrementModelSummaryBulk(uniqueRows)
       }
 
       return response.ok({
@@ -291,6 +299,14 @@ export default class SerialNumbersController {
       serialSuffix: serialSuffix,
     })
 
+    // ADDED: keep model_summary in sync. NOTE: verify `payload.shift` and
+    // `payload.lineNo` match your actual serialNumberValidator field
+    // names — adjust if your validator uses different keys.
+    await incrementModelSummary(
+      { modelId, lotNo, shift: (payload as any).shift, lineNo: (payload as any).lineNo },
+      newSerialNumber.createdAt.toJSDate()
+    )
+
     return response.status(201).send({
       success: true,
       data: newSerialNumber,
@@ -304,7 +320,29 @@ export default class SerialNumbersController {
     if (!serialNumber) {
       return response.notFound({ message: 'Serial number not found' })
     }
-    await serialNumber.delete()
+
+    // CHANGED: was two separate un-transactional calls — if decrement
+    // failed after delete had already committed, model_summary would
+    // silently drift too high relative to real data (exactly the bug
+    // that caused the total mismatch you found). Now both happen in one
+    // transaction: if decrement fails, the delete rolls back too.
+    const groupKey = {
+      modelId: (serialNumber as any).modelId,
+      lotNo: (serialNumber as any).lotNo,
+      shift: (serialNumber as any).shift,
+      lineNo: (serialNumber as any).lineNo,
+    }
+
+    const trx = await db.transaction()
+    try {
+      await serialNumber.useTransaction(trx).delete()
+      await decrementModelSummary(groupKey, trx)
+      await trx.commit()
+    } catch (error) {
+      await trx.rollback()
+      return response.internalServerError({ message: 'Failed to delete serial number' })
+    }
+
     return response.ok({ message: 'Serial number deleted successfully' })
   }
 

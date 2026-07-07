@@ -48,10 +48,11 @@ export default class AuthController {
         message: 'Logged out successfully',
       })
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error)
       return response.internalServerError({
         success: false,
         message: 'Logout failed',
-        error: error.message,
+        error: errorMessage,
       })
     }
   }
