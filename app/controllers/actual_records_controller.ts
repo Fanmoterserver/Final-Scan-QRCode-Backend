@@ -1,6 +1,7 @@
 import type { HttpContext } from '@adonisjs/core/http'
 import ActualRecord from '#models/actual_record'
 import { actualRecordValidator } from '#validators/actual_record'
+import { applyActualToModelSummary } from '#services/model_summary_service'
 
 export default class ActualRecordsController {
   // GET /actual-records?modelId=1&lotNo=LOT123
@@ -39,8 +40,14 @@ export default class ActualRecordsController {
         record.actual = actual
         await record.save()
       }
+
+      // ADDED: propagate to model_summary — applies to ALL shift/line_no
+      // groups under this model_id+lot_no, matching the original query's
+      // join behavior where one actual target applied lot-wide.
+      await applyActualToModelSummary(modelId, lotNo, actual)
+
       return response.ok({ success: true, data: record, message: 'Actual record success' })
-    } catch (error) {
+    } catch (error: any) {
       if (error.status === 422) {
         return response.status(422).send({
           success: false,

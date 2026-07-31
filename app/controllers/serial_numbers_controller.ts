@@ -8,6 +8,27 @@ import Excel from 'xlsx'
 import Application from '@adonisjs/core/services/app'
 import fs from 'fs/promises'
 import db from '@adonisjs/lucid/services/db'
+import {
+  incrementModelSummary,
+  incrementModelSummaryBulk,
+  decrementModelSummary,
+} from '#services/model_summary_service'
+
+function findHeaderRowIndex(sheet: Excel.WorkSheet): number | null {
+  const range = Excel.utils.decode_range(sheet['!ref'] ?? 'A1')
+
+  // Search rows index 3–5 = Excel rows 4–6 for "Serial Number" header
+  for (let rowIndex = 3; rowIndex <= 5; rowIndex++) {
+    for (let colIndex = range.s.c; colIndex <= range.e.c; colIndex++) {
+      const cellAddress = Excel.utils.encode_cell({ r: rowIndex, c: colIndex })
+      const cell = sheet[cellAddress]
+      if (cell?.v?.toString().trim() === 'Serial Number') {
+        return rowIndex
+      }
+    }
+  }
+  return null
+}
 
 export default class SerialNumbersController {
   /**
@@ -21,28 +42,47 @@ export default class SerialNumbersController {
   // upload serial numbers from Excel file
   async uploadExcel({ request, response }: HttpContext) {
     const file = request.file('file', { extnames: ['xlsx', 'xls'], size: '5mb' })
+
+    // ✅ Fix 2: Check file exists
     if (!file) return response.badRequest({ message: 'No file uploaded' })
 
+    // ✅ Fix 3: Check size/extension validation errors
+    if (file.hasErrors) {
+      return response.badRequest({ message: 'File validation failed', errors: file.errors })
+    }
+
     const filePath = Application.tmpPath(`uploads/${file.clientName}`)
-    await file.move(Application.tmpPath('uploads'), { name: file.clientName })
 
     try {
+      // ✅ Fix 4: file.move() inside try/catch
+      await file.move(Application.tmpPath('uploads'), { name: file.clientName })
+
+      if (file.hasErrors) {
+        return response.badRequest({ message: 'Failed to save uploaded file', errors: file.errors })
+      }
+
       const workbook = Excel.readFile(filePath)
       const sheet = workbook.Sheets[workbook.SheetNames[0]]
 
-      // 1. Extract Metadata from specific cells
-      // Note: xlsx cells are 0-indexed internally, but standard access uses names
-      const modelName = sheet['D1']?.v // Cell D1
-      const lotNo = sheet['B2']?.v?.toString() // Cell B2
-      const lineNo = sheet['D2']?.v // Cell D2
-      const shiftFromExcel = sheet['D3']?.v // Cell D3
+      // ✅ Fix 5: Auto-detect "Serial Number" header row (row 4 or row 5 both work)
+      const headerRowIndex = findHeaderRowIndex(sheet)
+
+      if (headerRowIndex === null) {
+        return response.badRequest({
+          message: 'Could not find "Serial Number" header (checked rows 4–6)',
+        })
+      }
+
+      // Extract metadata
+      const modelName = sheet['D1']?.v
+      const lotNo = sheet['B2']?.v?.toString()
+      const lineNo = sheet['D2']?.v
+      const shiftFromExcel = sheet['D3']?.v
 
       if (!modelName || !lotNo || !lineNo) {
         return response.badRequest({ message: 'Missing Model, Lot, or Line information in header' })
       }
 
-      // 2. Logic for Shift (Odd = A, Even = B)
-      // check if lotNo length is 6, then shift must be provided in D3, otherwise determine shift by last digit of lotNo
       let shift: string
 
       if (lotNo.length === 6) {
@@ -65,13 +105,11 @@ export default class SerialNumbersController {
         shift = lastDigit % 2 !== 0 ? 'A' : 'B'
       }
 
-      // 3. Get Model ID
       const model = await Model.findBy('model_name', modelName)
       if (!model) return response.badRequest({ message: `Model '${modelName}' not found` })
 
-      // 4. Extract Serial Numbers starting from Row 5
-      // 'range: 4' tells it to skip the first 4 rows (0, 1, 2, 3)
-      const data = Excel.utils.sheet_to_json(sheet, { range: 3 })
+      // ✅ Use detected header row instead of hardcoded range: 3
+      const data = Excel.utils.sheet_to_json(sheet, { range: headerRowIndex })
 
       const formattedRows = data
         .map((row: any) => ({
@@ -79,21 +117,17 @@ export default class SerialNumbersController {
           shift: shift,
           line_no: lineNo,
           lot_no: lotNo,
-          serial_number: row['Serial Number'], // Matches the green header in your image
-          serial_suffix: row['Serial Number']?.slice(-7), // Extract last 7 digits as suffix
+          serial_number: row['Serial Number'],
+          serial_suffix: row['Serial Number']?.slice(-7),
           created_at: new Date(),
           updated_at: new Date(),
         }))
         .filter((row) => !!row.serial_number)
 
-      // ... (rest of your existing duplicate checking and insert logic) ...
-
-      // Existing duplicate check logic remains the same
       let duplicates: string[] = []
       let uniqueRows: any[] = []
 
       if (model.isEricsson) {
-        // 🔥 Ericsson logic (last 7 digits only)
         const suffixes = formattedRows.map((r) => r.serial_suffix)
         const existingSerials = await SerialNumber.query()
           .where('model_id', model.id)
@@ -104,16 +138,11 @@ export default class SerialNumbersController {
 
         uniqueRows = formattedRows.filter((row) => {
           const suffix = row.serial_number.slice(-7)
-
           const isDup = existingSuffixSet.has(suffix)
-
           if (isDup) duplicates.push(row.serial_number)
-
           return !isDup
         })
       } else {
-        // 🔹 Normal logic
-
         const existingSerials = await SerialNumber.query()
           .where('model_id', model.id)
           .where('lot_no', lotNo)
@@ -123,18 +152,17 @@ export default class SerialNumbersController {
 
         uniqueRows = formattedRows.filter((row) => {
           const isDup = existingSet.has(row.serial_number)
-
           if (isDup) duplicates.push(row.serial_number)
-
           return !isDup
         })
       }
 
       if (uniqueRows.length > 0) {
         await db.table('serial_numbers').insert(uniqueRows)
+        // ADDED: keep model_summary in sync with this batch so dataSummary()
+        // reflects it immediately without recomputing from raw rows.
+        await incrementModelSummaryBulk(uniqueRows)
       }
-
-      await fs.unlink(filePath)
 
       return response.ok({
         message: 'Upload completed',
@@ -144,6 +172,13 @@ export default class SerialNumbersController {
       })
     } catch (error) {
       console.error(error)
+
+      // ✅ Also try cleanup on error, but only after stream is done
+      try {
+        await fs.unlink(filePath)
+      } catch {
+        // Safe to ignore
+      }
       return response.internalServerError({ message: 'Failed to process file' })
     }
   }
@@ -264,6 +299,14 @@ export default class SerialNumbersController {
       serialSuffix: serialSuffix,
     })
 
+    // ADDED: keep model_summary in sync. NOTE: verify `payload.shift` and
+    // `payload.lineNo` match your actual serialNumberValidator field
+    // names — adjust if your validator uses different keys.
+    await incrementModelSummary(
+      { modelId, lotNo, shift: (payload as any).shift, lineNo: (payload as any).lineNo },
+      newSerialNumber.createdAt.toJSDate()
+    )
+
     return response.status(201).send({
       success: true,
       data: newSerialNumber,
@@ -277,7 +320,33 @@ export default class SerialNumbersController {
     if (!serialNumber) {
       return response.notFound({ message: 'Serial number not found' })
     }
-    await serialNumber.delete()
+
+    // CHANGED: was two separate un-transactional calls — if decrement
+    // failed after delete had already committed, model_summary would
+    // silently drift too high relative to real data (exactly the bug
+    // that caused the total mismatch you found). Now both happen in one
+    // transaction: if decrement fails, the delete rolls back too.
+    const groupKey = {
+      modelId: (serialNumber as any).modelId,
+      lotNo: (serialNumber as any).lotNo,
+      shift: (serialNumber as any).shift,
+      lineNo: (serialNumber as any).lineNo,
+    }
+
+    const trx = await db.transaction()
+    try {
+      await serialNumber.useTransaction(trx).delete()
+      await decrementModelSummary(groupKey, trx)
+      await trx.commit()
+    } catch (error) {
+      await trx.rollback()
+      return response.internalServerError({ message: 'Failed to delete serial number' })
+    }
+
     return response.ok({ message: 'Serial number deleted successfully' })
   }
+
+  /**
+   * Helper: find which row index contains "Serial Number" header
+   */
 }
